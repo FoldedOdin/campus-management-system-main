@@ -600,6 +600,18 @@ export const candidateRequestsService = {
     return data;
   },
 
+  async getPendingByUserPosition(userId, positionId) {
+    const { data, error } = await supabase
+      .from('candidate_requests')
+      .select('id, status')
+      .eq('status', 'pending')
+      .eq('user_id', userId)
+      .eq('position_id', positionId)
+      .limit(1);
+    if (error) throw error;
+    return (data || [])[0] || null;
+  },
+
   async create(request) {
     const { data, error } = await supabase
       .from('candidate_requests')
@@ -713,6 +725,81 @@ export const collegeEventRequestsService = {
       admin_notes: adminNotes,
       updated_at: new Date().toISOString()
     });
+  }
+};
+
+/**
+ * Chairman Access Requests Service
+ */
+export const chairmanAccessRequestsService = {
+  async getAll() {
+    const { data, error } = await supabase
+      .from('chairman_access_requests')
+      .select(`
+        *,
+        candidate:candidates(id, name, party, position_id),
+        user:users(id, full_name, email)
+      `)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getByWinnerUser(userId) {
+    const { data, error } = await supabase
+      .from('chairman_access_requests')
+      .select(`
+        *,
+        candidate:candidates(id, name, party, position_id),
+        user:users(id, full_name, email)
+      `)
+      .eq('winner_user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getPendingByWinnerUser(userId) {
+    const { data, error } = await supabase
+      .from('chairman_access_requests')
+      .select('*')
+      .eq('winner_user_id', userId)
+      .eq('status', 'pending')
+      .limit(1);
+    if (error) throw error;
+    return (data || [])[0] || null;
+  },
+
+  async create(payload) {
+    const { data, error } = await supabase
+      .from('chairman_access_requests')
+      .insert([payload])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async approve(id) {
+    const { data, error } = await supabase
+      .from('chairman_access_requests')
+      .update({ status: 'approved', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async reject(id) {
+    const { data, error } = await supabase
+      .from('chairman_access_requests')
+      .update({ status: 'rejected', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
   }
 };
 

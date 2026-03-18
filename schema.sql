@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   department VARCHAR(255),
   year VARCHAR(50),
   phone VARCHAR(20),
+  selfie_url VARCHAR(500),
   verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -128,6 +129,21 @@ CREATE TABLE IF NOT EXISTS votes (
 CREATE INDEX IF NOT EXISTS idx_votes_student ON votes(student_id);
 CREATE INDEX IF NOT EXISTS idx_votes_candidate ON votes(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_votes_position ON votes(position_id);
+
+-- ========================================
+-- 5. CHAIRMAN ACCESS REQUESTS
+-- ========================================
+CREATE TABLE IF NOT EXISTS chairman_access_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  winner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  winner_candidate_id UUID REFERENCES candidates(id) ON DELETE SET NULL,
+  status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+  admin_notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chairman_access_requests_user ON chairman_access_requests(winner_user_id);
 
 -- ========================================
 -- 4B. BLOCKCHAIN VOTE AUDIT TABLE

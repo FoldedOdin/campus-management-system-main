@@ -83,7 +83,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
-import { votesService, collegeEventRequestsService } from "../lib/supabaseService";
+import { votesService, collegeEventRequestsService, chairmanAccessRequestsService } from "../lib/supabaseService";
 import { createElectionOnChain, isBlockchainVoteEnabled } from "../lib/blockchainService";
 import DashboardBackdrop from "../components/DashboardBackdrop";
 
@@ -116,6 +116,7 @@ export default function AdminDashboard() {
     requireVerification: true
   });
   const [openElectionDialog, setOpenElectionDialog] = useState(false);
+  const [startingElection, setStartingElection] = useState(false);
   const [voters, setVoters] = useState([]);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -125,6 +126,7 @@ export default function AdminDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [candidateRequests, setCandidateRequests] = useState([]);
   const [collegeEventRequests, setCollegeEventRequests] = useState([]);
+  const [chairmanAccessRequests, setChairmanAccessRequests] = useState([]);
   const [openRequestDetailDialog, setOpenRequestDetailDialog] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [votes, setVotes] = useState([]);
@@ -156,7 +158,8 @@ export default function AdminDashboard() {
         requestsRes,
         settingsRes,
         votesData,
-        collegeEventRequestsData
+        collegeEventRequestsData,
+        chairmanAccessRequestsData
       ] = await Promise.all([
         supabase.from('positions').select('*').order('created_at', { ascending: true }),
         supabase.from('candidates').select('*').order('created_at', { ascending: false }),
@@ -171,7 +174,8 @@ export default function AdminDashboard() {
           .order('created_at', { ascending: false }),
         supabase.from('election_settings').select('*').order('created_at', { ascending: false }).limit(1),
         votesService.getAllWithBlockchainAudit(),
-        collegeEventRequestsService.getAll()
+        collegeEventRequestsService.getAll(),
+        chairmanAccessRequestsService.getAll()
       ]);
 
       if (positionsRes.error) throw positionsRes.error;
@@ -214,6 +218,16 @@ export default function AdminDashboard() {
       setCandidateRequests(mappedRequests);
       setCollegeEventRequests(
         (collegeEventRequestsData || []).map((r) => ({
+          ...r,
+          winnerName: r.candidate?.name || r.user?.full_name || 'Winner',
+          winnerEmail: r.user?.email || '',
+          candidateParty: r.candidate?.party || '',
+          createdAt: r.created_at,
+          processedAt: r.updated_at
+        }))
+      );
+      setChairmanAccessRequests(
+        (chairmanAccessRequestsData || []).map((r) => ({
           ...r,
           winnerName: r.candidate?.name || r.user?.full_name || 'Winner',
           winnerEmail: r.user?.email || '',
@@ -701,6 +715,46 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleApproveChairmanAccess = async (request) => {
+    try {
+      const updated = await chairmanAccessRequestsService.approve(request.id);
+      setChairmanAccessRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, ...updated } : r)));
+      if (request.winner_user_id) {
+        await supabase.from('users').update({ role: 'chairman' }).eq('id', request.winner_user_id);
+      }
+      showSnackbar(`Chairman access approved for ${request.winnerName}.`);
+    } catch (err) {
+      console.error('Error approving chairman access request', err);
+      showSnackbar('Failed to approve chairman access request', 'error');
+    }
+  };
+
+  const handleRejectChairmanAccess = async (request) => {
+    try {
+      const updated = await chairmanAccessRequestsService.reject(request.id);
+      setChairmanAccessRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, ...updated } : r)));
+      showSnackbar(`Chairman access request rejected for ${request.winnerName}.`);
+    } catch (err) {
+      console.error('Error rejecting chairman access request', err);
+      showSnackbar('Failed to reject chairman access request', 'error');
+    }
+  };
+
+  const openElectionDialogWithDefaults = () => {
+    if (!electionSettings.startTime || !electionSettings.endTime) {
+      const now = new Date();
+      const startLocal = new Date(now.getTime() + 5 * 60000);
+      const endLocal = new Date(now.getTime() + 2 * 60 * 60000);
+      const toLocalInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      setElectionSettings((prev) => ({
+        ...prev,
+        startTime: prev.startTime || toLocalInput(startLocal),
+        endTime: prev.endTime || toLocalInput(endLocal)
+      }));
+    }
+    setOpenElectionDialog(true);
+  };
+
   const handleStartElection = async () => {
     if (!electionSettings.startTime || !electionSettings.endTime) {
       showSnackbar("Please set both start and end times", "warning");
@@ -727,6 +781,7 @@ export default function AdminDashboard() {
     };
 
     try {
+      setStartingElection(true);
       // First create election on blockchain if enabled
       let blockchainResult = null;
       if (isBlockchainVoteEnabled()) {
@@ -768,6 +823,8 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error('Failed to start election', err);
       showSnackbar(getElectionSettingsMutationErrorMessage(err, 'start'), "error");
+    } finally {
+      setStartingElection(false);
     }
   };
 
@@ -1405,7 +1462,7 @@ export default function AdminDashboard() {
                       fullWidth
                       variant="contained"
                       startIcon={electionSettings.isActive ? <Stop /> : <PlayArrow />}
-                      onClick={electionSettings.isActive ? handleStopElection : () => setOpenElectionDialog(true)}
+                      onClick={electionSettings.isActive ? handleStopElection : openElectionDialogWithDefaults}
                       color={electionSettings.isActive ? "error" : "success"}
                       sx={{ mb: 2 }}
                     >
@@ -1427,7 +1484,7 @@ export default function AdminDashboard() {
 
             <TabPanel value={activeTab} index={1}>
               <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h5" fontWeight="bold">
+                <Typography variant="h5" fontWeight="bold" sx={{ color: '#0b2a4c' }}>
                   <People sx={{ mr: 1, verticalAlign: 'middle' }} />
                   Manage Candidates ({candidates.length})
                 </Typography>
@@ -1445,15 +1502,25 @@ export default function AdminDashboard() {
               <Box sx={{ mb: 3, display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   {positions.length === 0 ? (
-                    <Typography variant="caption" color="text.secondary">No positions defined</Typography>
+                    <Typography variant="caption" sx={{ color: '#0b2a4c' }}>No positions defined</Typography>
                   ) : (
                     positions.map(p => (
-                      <Chip key={p.id} label={p.name} size="small" />
+                      <Chip
+                        key={p.id}
+                        label={p.name}
+                        size="small"
+                        variant="outlined"
+                        sx={{
+                          color: '#0b2a4c',
+                          borderColor: 'rgba(11, 42, 76, 0.35)',
+                          background: 'rgba(11, 42, 76, 0.08)'
+                        }}
+                      />
                     ))
                   )}
                 </Box>
                 <Box>
-                  <Button variant="outlined" size="small" onClick={() => setOpenPositionDialog(true)} startIcon={<Settings />}>Manage Positions</Button>
+                      <Button variant="outlined" size="small" onClick={() => setOpenPositionDialog(true)} startIcon={<Settings />}>Manage Positions</Button>
                 </Box>
               </Box>
 
@@ -1607,7 +1674,7 @@ export default function AdminDashboard() {
             {/* Candidate Requests Tab */}
             <TabPanel value={activeTab} index={2}>
               <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h5" fontWeight="bold">
+                <Typography variant="h5" fontWeight="bold" sx={{ color: '#0b2a4c' }}>
                   <PersonAdd sx={{ mr: 1, verticalAlign: 'middle' }} />
                   Candidate Requests ({candidateRequests.filter(r => r.status === 'pending').length})
                 </Typography>
@@ -1686,12 +1753,21 @@ export default function AdminDashboard() {
 
               {candidateRequests.some(r => r.status === 'approved' || r.status === 'rejected') && (
                 <Box sx={{ mt: 4 }}>
-                  <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
+                  <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: '#0b2a4c' }}>
                     Processed Requests
                   </Typography>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
                     {candidateRequests.filter(r => r.status !== 'pending').map((request) => (
-                      <Card key={request.id} sx={{ borderRadius: 3, opacity: 0.7 }}>
+                      <Card
+                        key={request.id}
+                        sx={{
+                          borderRadius: 3,
+                          background: 'linear-gradient(135deg, #081b2f 0%, #0b2a4c 45%, #07213b 100%)',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          boxShadow: '0 10px 22px rgba(2, 6, 23, 0.25)',
+                          color: '#eef2f7'
+                        }}
+                      >
                         <CardContent>
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Box>
@@ -1705,7 +1781,7 @@ export default function AdminDashboard() {
                                 sx={{ mt: 0.5 }}
                               />
                             </Box>
-                            <Typography variant="body2" color="textSecondary">
+                            <Typography variant="body2" sx={{ color: 'rgba(238, 242, 247, 0.75)' }}>
                               {request.processedAt ? new Date(request.processedAt).toLocaleDateString() : '-'}
                             </Typography>
                           </Box>
@@ -1719,7 +1795,7 @@ export default function AdminDashboard() {
 
             <TabPanel value={activeTab} index={3}>
               <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h5" fontWeight="bold">
+                <Typography variant="h5" fontWeight="bold" sx={{ color: '#0b2a4c' }}>
                   <HowToVote sx={{ mr: 1, verticalAlign: 'middle' }} />
                   Voter Management ({voters.length})
                 </Typography>
@@ -1742,13 +1818,12 @@ export default function AdminDashboard() {
                         <TableCell>Department</TableCell>
                         <TableCell>Year</TableCell>
                         <TableCell>Voting Status</TableCell>
-                        <TableCell>Voted For</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {voters.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} align="center">
+                          <TableCell colSpan={5} align="center">
                             No voters registered yet
                           </TableCell>
                         </TableRow>
@@ -1758,13 +1833,6 @@ export default function AdminDashboard() {
                           .map((voter) => {
                             const studentVotes = votes.filter(v => v.student_id === voter.id);
                             const hasVoted = studentVotes.length > 0;
-                            const firstVote = studentVotes[0];
-                            const firstCandidateName = firstVote
-                              ? candidates.find(c => c.id === firstVote.candidate_id)?.name
-                              : null;
-                            const voteLabel = studentVotes.length > 1
-                              ? "Multiple"
-                              : (firstCandidateName || "Voted");
                             
                             return (
                               <TableRow key={voter.email}>
@@ -1791,19 +1859,6 @@ export default function AdminDashboard() {
                                     size="small"
                                   />
                                 </TableCell>
-                                <TableCell>
-                                  {hasVoted ? (
-                                    <Chip 
-                                      label={voteLabel}
-                                      size="small"
-                                      variant="outlined"
-                                    />
-                                  ) : (
-                                    <Typography variant="caption" color="text.secondary">
-                                      Not voted
-                                    </Typography>
-                                  )}
-                                </TableCell>
                               </TableRow>
                             );
                           })
@@ -1825,7 +1880,7 @@ export default function AdminDashboard() {
 
             <TabPanel value={activeTab} index={4}>
               <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h5" fontWeight="bold">
+                <Typography variant="h5" fontWeight="bold" sx={{ color: '#0b2a4c' }}>
                   <Analytics sx={{ mr: 1, verticalAlign: 'middle' }} />
                   Election Analytics
                 </Typography>
@@ -2006,7 +2061,7 @@ export default function AdminDashboard() {
             </TabPanel>
 
             <TabPanel value={activeTab} index={5}>
-              <Typography variant="h5" fontWeight="bold" gutterBottom>
+              <Typography variant="h5" fontWeight="bold" gutterBottom sx={{ color: '#0b2a4c' }}>
                 <Settings sx={{ mr: 1, verticalAlign: 'middle' }} />
                 Election Settings
               </Typography>
@@ -2073,7 +2128,7 @@ export default function AdminDashboard() {
                       </Button>
                       <Button
                         variant="outlined"
-                        onClick={() => setOpenElectionDialog(true)}
+                        onClick={openElectionDialogWithDefaults}
                       >
                         Configure Election Timing
                       </Button>
@@ -2085,7 +2140,7 @@ export default function AdminDashboard() {
 
             <TabPanel value={activeTab} index={6}>
               <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h5" fontWeight="bold">
+                <Typography variant="h5" fontWeight="bold" sx={{ color: '#0b2a4c' }}>
                   <Schedule sx={{ mr: 1, verticalAlign: 'middle' }} />
                   Winning Candidate Requests ({collegeEventRequests.filter((r) => r.status === 'pending').length})
                 </Typography>
@@ -2185,6 +2240,85 @@ export default function AdminDashboard() {
                   </TableContainer>
                 </Box>
               )}
+
+              <Box sx={{ mt: 5 }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ mb: 2, color: '#0b2a4c' }}>
+                  Chairman Access Requests ({chairmanAccessRequests.filter((r) => r.status === 'pending').length})
+                </Typography>
+
+                {chairmanAccessRequests.length === 0 ? (
+                  <Alert severity="info">No chairman access requests yet.</Alert>
+                ) : (
+                  <>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+                      {chairmanAccessRequests.filter((r) => r.status === 'pending').map((request) => (
+                        <Card key={request.id} sx={{ borderRadius: 3 }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                              <Box>
+                                <Typography variant="subtitle1" fontWeight="bold">
+                                  {request.winnerName}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {request.winnerEmail}
+                                </Typography>
+                              </Box>
+                              <Chip label="Pending" size="small" color="warning" />
+                            </Box>
+                            <Typography variant="body2" sx={{ mb: 2 }}>
+                              Candidate: {request.winnerName} {request.candidateParty ? `(${request.candidateParty})` : ''}
+                            </Typography>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              <Button size="small" variant="contained" color="success" onClick={() => handleApproveChairmanAccess(request)}>
+                                Approve Access
+                              </Button>
+                              <Button size="small" variant="outlined" color="error" onClick={() => handleRejectChairmanAccess(request)}>
+                                Reject
+                              </Button>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </Box>
+
+                    {chairmanAccessRequests.some((r) => r.status !== 'pending') && (
+                      <Box sx={{ mt: 3 }}>
+                        <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
+                          Processed Chairman Requests
+                        </Typography>
+                        <TableContainer component={Paper}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Winner</TableCell>
+                                <TableCell>Status</TableCell>
+                                <TableCell>Processed On</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {chairmanAccessRequests
+                                .filter((r) => r.status !== 'pending')
+                                .map((request) => (
+                                  <TableRow key={request.id}>
+                                    <TableCell>{request.winnerName}</TableCell>
+                                    <TableCell>
+                                      <Chip
+                                        size="small"
+                                        label={request.status}
+                                        color={request.status === 'approved' ? 'success' : 'error'}
+                                      />
+                                    </TableCell>
+                                    <TableCell>{request.processedAt ? new Date(request.processedAt).toLocaleDateString() : '-'}</TableCell>
+                                  </TableRow>
+                                ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      </Box>
+                    )}
+                  </>
+                )}
+              </Box>
             </TabPanel>
           </Box>
         </Box>
@@ -2270,10 +2404,10 @@ export default function AdminDashboard() {
             <Button 
               variant="contained" 
               onClick={handleStartElection}
-              disabled={!electionSettings.startTime || !electionSettings.endTime}
+              disabled={!electionSettings.startTime || !electionSettings.endTime || startingElection}
               startIcon={<CheckCircle />}
             >
-              Start Election
+              {startingElection ? "Starting..." : "Start Election"}
             </Button>
           </DialogActions>
         </Dialog>

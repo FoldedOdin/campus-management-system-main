@@ -107,6 +107,7 @@ export default function StudentDashboard() {
   const [lastBlockchainVote, setLastBlockchainVote] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
   const [openCandidateRequestDialog, setOpenCandidateRequestDialog] = useState(false);
+  const [submittingCandidateRequest, setSubmittingCandidateRequest] = useState(false);
   const [candidateRequest, setCandidateRequest] = useState({
     position: "",
     bio: "",
@@ -252,12 +253,10 @@ export default function StudentDashboard() {
     }
 
     try {
-      const pendingRequests = await candidateRequestsService.getPending();
-      const hasPending = pendingRequests.some(
-        (r) =>
-          r.user_id === currentUser?.id &&
-          r.position_id === candidateRequest.position &&
-          r.status === "pending"
+      setSubmittingCandidateRequest(true);
+      const hasPending = await candidateRequestsService.getPendingByUserPosition(
+        currentUser?.id,
+        candidateRequest.position
       );
 
       if (hasPending) {
@@ -292,6 +291,8 @@ export default function StudentDashboard() {
     } catch (err) {
       console.error("Error submitting candidate request", err);
       showSnackbar("Error submitting request", "error");
+    } finally {
+      setSubmittingCandidateRequest(false);
     }
   };
 
@@ -460,7 +461,7 @@ export default function StudentDashboard() {
     }
   };
 
-  const handleVoteClick = (candidate) => {
+  const openVoteConfirm = (candidate) => {
     if (!positions || positions.length === 0) {
       if (!canVote) {
         showSnackbar("You cannot vote at this time", "warning");
@@ -483,6 +484,10 @@ export default function StudentDashboard() {
     setSelectedCandidate(candidate);
     setSelectedPosition(posId);
     setShowConfirmDialog(true);
+  };
+
+  const handleVoteClick = (candidate) => {
+    openVoteConfirm(candidate);
   };
 
   const handleConfirmVote = async () => {
@@ -610,11 +615,29 @@ export default function StudentDashboard() {
   const timeRemaining = getTimeRemaining();
   const canVote = electionStatus === "active" && !voted && candidates.length > 0;
   const totalVotes = candidates.reduce((sum, c) => sum + (c.vote_count || 0), 0);
+  const fallbackVote = Object.values(studentVotes || {})[0] || null;
+  const fallbackCandidate = fallbackVote
+    ? candidates.find((c) => String(c.id) === String(fallbackVote.candidate_id))
+    : null;
+  const displayCandidate = selectedCandidate || fallbackCandidate;
   const quickActionButtonSx = {
-    color: "#333",
-    borderColor: "#333",
+    color: "#fff",
+    borderColor: "rgba(255,255,255,0.8)",
     minHeight: 44,
-    "&:hover": { background: "rgba(51,51,51,0.1)" }
+    "&:hover": { background: "rgba(255,255,255,0.12)" }
+  };
+  const voteCardSx = {
+    borderRadius: 3,
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    border: "1px solid rgba(15, 23, 42, 0.08)",
+    height: "100%",
+    background: "linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%)",
+    "&:hover": {
+      transform: "translateY(-6px)",
+      boxShadow: "0 18px 32px rgba(15, 23, 42, 0.12)",
+      borderColor: "rgba(2, 132, 199, 0.35)"
+    }
   };
 
   const studentProfile = currentUser || {};
@@ -915,7 +938,7 @@ export default function StudentDashboard() {
                     flexWrap: "wrap"
                   }}
                 >
-                  <Typography variant="h5" fontWeight="bold" sx={{ display: "flex", alignItems: "center" }}>
+                  <Typography variant="h5" fontWeight="bold" sx={{ display: "flex", alignItems: "center", color: "#0b2a4c" }}>
                     <HowToVote sx={{ mr: 1, color: "primary.main" }} />
                     Cast Your Vote
                   </Typography>
@@ -924,7 +947,11 @@ export default function StudentDashboard() {
                     variant="outlined"
                     color="secondary"
                     onClick={() => setOpenCandidateRequestDialog(true)}
-                    sx={{ whiteSpace: "nowrap" }}
+                    sx={{
+                      whiteSpace: "nowrap",
+                      background: "transparent",
+                      "&:hover": { background: "transparent" }
+                    }}
                   >
                     Request to be Candidate
                   </Button>
@@ -946,12 +973,12 @@ export default function StudentDashboard() {
                         ? Vote Submitted Successfully!
                       </Typography>
                       <Typography variant="h6" gutterBottom>
-                        You voted for: <strong>{selectedCandidate.name}</strong>
+                        You voted for: <strong>{displayCandidate?.name || "your candidate"}</strong>
                       </Typography>
                       <Typography variant="body2" sx={{ mb: 2 }}>
                         You have voted for {Object.keys(studentVotes).length + 1} out of {positions.length} positions.
                       </Typography>
-                      <Chip label={selectedCandidate.party} variant="outlined" color="primary" sx={{ mb: 2 }} />
+                      <Chip label={displayCandidate?.party || "N/A"} variant="outlined" color="primary" sx={{ mb: 2 }} />
                       <Typography variant="body2" sx={{ mt: 2, maxWidth: 600, mx: "auto", color: "#000" }}>
                         Your vote has been securely recorded. {Object.keys(studentVotes).length + 1 < positions.length ? 'Continue voting for other positions.' : 'You have completed voting for all positions.'}
                       </Typography>
@@ -973,7 +1000,7 @@ export default function StudentDashboard() {
                   <Fade in>
                     <Box sx={{ textAlign: "center", py: { xs: 4, sm: 6 }, px: 2 }}>
                       <Info sx={{ fontSize: { xs: 60, sm: 80 }, color: "info.main", mb: 2 }} />
-                      <Typography variant="h6" gutterBottom>
+                      <Typography variant="h6" gutterBottom sx={{ color: "#0b2a4c" }}>
                         {electionStatus === "not_started" && "Election has not started yet"}
                         {electionStatus === "scheduled" && "Election will start soon"}
                         {electionStatus === "ended" && "Election has ended"}
@@ -991,9 +1018,9 @@ export default function StudentDashboard() {
 
                       {electionStatus === "scheduled" && electionSettings?.startTime && (
                         <Box sx={{ mt: 4, maxWidth: 400, mx: "auto" }}>
-                          <Typography variant="body2" fontWeight="bold" gutterBottom>
-                            Time until voting starts:
-                          </Typography>
+                        <Typography variant="body2" fontWeight="bold" gutterBottom sx={{ color: "#0b2a4c" }}>
+                          Time until voting starts:
+                        </Typography>
                           <LinearProgress variant="determinate" value={50} sx={{ height: 8, borderRadius: 4 }} />
                           <Typography variant="caption" sx={{ color: "#000" }}>
                             {new Date(electionSettings.startTime).toLocaleDateString()} at {new Date(electionSettings.startTime).toLocaleTimeString()}
@@ -1033,20 +1060,7 @@ export default function StudentDashboard() {
                                     <Grid item xs={12} sm={6} md={4} key={candidate.id}>
                                       <Card
                                         className="dashboard-content-card"
-                                        sx={{
-                                          borderRadius: 3,
-                                          cursor: "pointer",
-                                          transition: "all 0.3s ease",
-                                          border: "2px solid transparent",
-                                          height: "100%",
-                                          color: "rgba(255,255,255,0.92)",
-                                          background: "linear-gradient(145deg, #081827 0%, #0b2a4c 45%, #041a2f 100%)",
-                                          "&:hover": {
-                                            transform: "translateY(-8px)",
-                                            boxShadow: "0 20px 40px rgba(0,0,0,0.35)",
-                                            borderColor: "rgba(255,255,255,0.25)"
-                                          }
-                                        }}
+                                        sx={voteCardSx}
                                         onClick={() => handleVoteClick(candidate)}
                                       >
                                         <CardContent
@@ -1067,7 +1081,7 @@ export default function StudentDashboard() {
                                             {getAvatarText(candidate.name)}
                                           </Avatar>
 
-                                          <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ flexGrow: 0, color: "inherit" }}>
+                                          <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ flexGrow: 0 }}>
                                             {candidate.name}
                                           </Typography>
 
@@ -1075,17 +1089,13 @@ export default function StudentDashboard() {
                                             label={candidate.party}
                                             variant="outlined"
                                             color="primary"
-                                            sx={{
-                                              mb: 2,
-                                              borderColor: "rgba(255,255,255,0.4)",
-                                              color: "rgba(255,255,255,0.92)"
-                                            }}
+                                            sx={{ mb: 2 }}
                                           />
 
                                           {candidate.bio && (
                                             <Typography
                                               variant="body2"
-                                              sx={{ mb: 2, flexGrow: 1, color: "rgba(255,255,255,0.75)", lineHeight: 1.6 }}
+                                              sx={{ mb: 2, flexGrow: 1, color: "text.secondary", lineHeight: 1.6 }}
                                             >
                                               {candidate.bio.length > 100
                                                 ? `${candidate.bio.substring(0, 100)}...`
@@ -1097,7 +1107,7 @@ export default function StudentDashboard() {
                                             {electionStatus === "ended" && (
                                               <Typography
                                                 variant="caption"
-                                                sx={{ display: "block", mb: 1, color: "rgba(255,255,255,0.7)" }}
+                                                sx={{ display: "block", mb: 1, color: "text.secondary" }}
                                               >
                                                 Votes: {candidate.vote_count || 0}
                                               </Typography>
@@ -1114,6 +1124,9 @@ export default function StudentDashboard() {
                                                 "&:hover": {
                                                   background:
                                                     "linear-gradient(130deg, #0e7490 0%, #0b5a8f 40%, #063b5f 70%, #021b2b 100%)"
+                                                },
+                                                "&:disabled": {
+                                                  background: "rgba(2, 6, 23, 0.2)"
                                                 }
                                               }}
                                             >
@@ -1137,18 +1150,7 @@ export default function StudentDashboard() {
                             <Grid item xs={12} sm={6} md={4} key={candidate.id}>
                               <Card
                                 className="dashboard-content-card"
-                                sx={{
-                                  borderRadius: 3,
-                                  cursor: "pointer",
-                                  transition: "all 0.3s ease",
-                                  border: "2px solid transparent",
-                                  height: "100%",
-                                  "&:hover": {
-                                    transform: "translateY(-8px)",
-                                    boxShadow: "0 20px 40px rgba(0,0,0,0.15)",
-                                    borderColor: "primary.main"
-                                  }
-                                }}
+                                sx={voteCardSx}
                                 onClick={() => handleVoteClick(candidate)}
                               >
                                 <CardContent
@@ -1232,7 +1234,7 @@ export default function StudentDashboard() {
                   border: "1px solid rgba(0,0,0,0.05)"
                 }}
               >
-                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3, display: "flex", alignItems: "center" }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3, display: "flex", alignItems: "center", color: "#0b2a4c" }}>
                   <People sx={{ mr: 1, color: "primary.main" }} />
                   Candidate Profiles
                   <Chip label={`${candidates.length} Candidates`} size="small" color="primary" sx={{ ml: 2 }} />
@@ -1240,11 +1242,11 @@ export default function StudentDashboard() {
 
                 {candidates.length === 0 ? (
                   <Box sx={{ textAlign: "center", py: 6 }}>
-                    <People sx={{ fontSize: 60, color: "text.secondary", mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary" gutterBottom>
+                    <People sx={{ fontSize: 60, color: "#0b2a4c", mb: 2 }} />
+                    <Typography variant="h6" sx={{ color: "#0b2a4c" }} gutterBottom>
                       No candidates announced yet
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" sx={{ color: "#0b2a4c" }}>
                       Candidate information will be displayed here once announced by the election committee.
                     </Typography>
                   </Box>
@@ -1388,7 +1390,7 @@ export default function StudentDashboard() {
                 }}
               >
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 4, flexWrap: "wrap", gap: 2 }}>
-                  <Typography variant="h5" fontWeight="bold" sx={{ display: "flex", alignItems: "center" }}>
+                  <Typography variant="h5" fontWeight="bold" sx={{ display: "flex", alignItems: "center", color: "#0b2a4c" }}>
                     <Announcement sx={{ mr: 1, color: "primary.main" }} />
                     Announcement Gallery
                   </Typography>
@@ -1439,11 +1441,11 @@ export default function StudentDashboard() {
 
                 {announcements.length === 0 ? (
                   <Box sx={{ textAlign: "center", py: 8 }}>
-                    <Announcement sx={{ fontSize: 60, color: "text.secondary", mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary" gutterBottom>
+                    <Announcement sx={{ fontSize: 60, color: "#0b2a4c", mb: 2 }} />
+                    <Typography variant="h6" sx={{ color: "#0b2a4c" }} gutterBottom>
                       No announcements yet
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" sx={{ color: "#0b2a4c" }}>
                       Important updates will appear here
                     </Typography>
                   </Box>
@@ -1573,15 +1575,15 @@ export default function StudentDashboard() {
                   border: "1px solid rgba(0,0,0,0.05)"
                 }}
               >
-                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3, display: "flex", alignItems: "center" }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3, display: "flex", alignItems: "center", color: "#0b2a4c" }}>
                   <Schedule sx={{ mr: 1, color: "primary.main" }} />
                   Election Timeline
                 </Typography>
 
                 {!electionSettings ? (
                   <Box sx={{ textAlign: "center", py: 6 }}>
-                    <Schedule sx={{ fontSize: 60, color: "text.secondary", mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
+                    <Schedule sx={{ fontSize: 60, color: "#0b2a4c", mb: 2 }} />
+                    <Typography variant="h6" sx={{ color: "#0b2a4c" }}>
                       Election schedule not set
                     </Typography>
                   </Box>
@@ -1602,36 +1604,36 @@ export default function StudentDashboard() {
                     >
                       <Step>
                         <StepLabel>
-                          <Typography variant="subtitle2" fontWeight="bold">
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: "#0b2a4c" }}>
                             Preparation
                           </Typography>
-                          <Typography variant="caption">Candidate registration</Typography>
+                          <Typography variant="caption" sx={{ color: "#0b2a4c" }}>Candidate registration</Typography>
                         </StepLabel>
                       </Step>
                       <Step>
                         <StepLabel>
-                          <Typography variant="subtitle2" fontWeight="bold">
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: "#0b2a4c" }}>
                             Campaign Period
                           </Typography>
-                          <Typography variant="caption">Campaigning and debates</Typography>
+                          <Typography variant="caption" sx={{ color: "#0b2a4c" }}>Campaigning and debates</Typography>
                         </StepLabel>
                       </Step>
                       <Step>
                         <StepLabel>
-                          <Typography variant="subtitle2" fontWeight="bold">
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: "#0b2a4c" }}>
                             Voting Period
                           </Typography>
-                          <Typography variant="caption">
+                          <Typography variant="caption" sx={{ color: "#0b2a4c" }}>
                             {new Date(electionSettings.startTime).toLocaleDateString()} - {new Date(electionSettings.endTime).toLocaleDateString()}
                           </Typography>
                         </StepLabel>
                       </Step>
                       <Step>
                         <StepLabel>
-                          <Typography variant="subtitle2" fontWeight="bold">
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: "#0b2a4c" }}>
                             Results
                           </Typography>
-                          <Typography variant="caption">Counting and announcement</Typography>
+                          <Typography variant="caption" sx={{ color: "#0b2a4c" }}>Counting and announcement</Typography>
                         </StepLabel>
                       </Step>
                     </Stepper>
@@ -1754,18 +1756,18 @@ export default function StudentDashboard() {
                   border: "1px solid rgba(0,0,0,0.05)"
                 }}
               >
-                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3, display: "flex", alignItems: "center" }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3, display: "flex", alignItems: "center", color: "#0b2a4c" }}>
                   <History sx={{ mr: 1, color: "primary.main" }} />
                   Your Voting History
                 </Typography>
 
                 {!voted ? (
                   <Box sx={{ textAlign: "center", py: 6 }}>
-                    <History sx={{ fontSize: 60, color: "text.secondary", mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary" gutterBottom>
+                    <History sx={{ fontSize: 60, color: "#0b2a4c", mb: 2 }} />
+                    <Typography variant="h6" sx={{ color: "#0b2a4c" }} gutterBottom>
                       No voting history found
                     </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    <Typography variant="body2" sx={{ color: "#0b2a4c", mb: 3 }}>
                       You haven't voted in this election yet.
                     </Typography>
                     {canVote && (
@@ -1789,12 +1791,12 @@ export default function StudentDashboard() {
                             fontWeight: "bold"
                           }}
                         >
-                          {getAvatarText(selectedCandidate?.name)}
+                          {getAvatarText(displayCandidate?.name)}
                         </Avatar>
                         <Typography variant="h4" fontWeight="bold" gutterBottom>
-                          {selectedCandidate?.name}
+                          {displayCandidate?.name || "Your Candidate"}
                         </Typography>
-                        <Chip label={selectedCandidate?.party} variant="outlined" color="primary" sx={{ mb: 2 }} />
+                        <Chip label={displayCandidate?.party || "N/A"} variant="outlined" color="primary" sx={{ mb: 2 }} />
                       </Box>
 
                       <Grid container spacing={3}>
@@ -2229,8 +2231,8 @@ export default function StudentDashboard() {
           </DialogContent>
           <DialogActions sx={{ p: 2 }}>
             <Button onClick={() => setOpenCandidateRequestDialog(false)}>Cancel</Button>
-            <Button onClick={handleCandidateRequest} variant="contained" color="primary">
-              Submit Request
+            <Button onClick={handleCandidateRequest} variant="contained" color="primary" disabled={submittingCandidateRequest}>
+              {submittingCandidateRequest ? "Submitting..." : "Submit Request"}
             </Button>
           </DialogActions>
         </Dialog>

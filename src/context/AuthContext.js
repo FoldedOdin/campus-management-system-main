@@ -100,6 +100,7 @@ export function AuthProvider({ children }) {
       department: user.department || user.student_department || '',
       year: user.year || user.academic_year || '',
       phone: user.phone || '',
+      selfieUrl: user.selfie_url || user.selfieUrl || '',
       verified: user.verified ?? false,
     };
   };
@@ -115,6 +116,7 @@ export function AuthProvider({ children }) {
       department: meta.department || '',
       year: meta.year || '',
       phone: meta.phone || '',
+      selfieUrl: meta.selfie_url || '',
       verified: !!authUser?.email_confirmed_at,
     };
   };

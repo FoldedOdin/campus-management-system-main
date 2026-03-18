@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS public.users_orphan_backup (
   department VARCHAR(255),
   year VARCHAR(50),
   phone VARCHAR(20),
+  selfie_url VARCHAR(500),
   verified BOOLEAN,
   created_at TIMESTAMP,
   updated_at TIMESTAMP,
@@ -25,10 +26,10 @@ CREATE TABLE IF NOT EXISTS public.users_orphan_backup (
 );
 
 INSERT INTO public.users_orphan_backup (
-  id, email, full_name, role, student_id, department, year, phone, verified, created_at, updated_at
+  id, email, full_name, role, student_id, department, year, phone, selfie_url, verified, created_at, updated_at
 )
 SELECT
-  u.id, u.email, u.full_name, u.role, u.student_id, u.department, u.year, u.phone, u.verified, u.created_at, u.updated_at
+  u.id, u.email, u.full_name, u.role, u.student_id, u.department, u.year, u.phone, u.selfie_url, u.verified, u.created_at, u.updated_at
 FROM public.users u
 LEFT JOIN auth.users au ON au.id = u.id
 WHERE au.id IS NULL;
@@ -71,7 +72,7 @@ BEGIN
     ALTER TABLE public.users DROP CONSTRAINT users_role_check;
   END IF;
 
-  ALTER TABLE public.users
+ALTER TABLE public.users
     ADD CONSTRAINT users_role_check
     CHECK (role IN (
       'student',
@@ -87,6 +88,9 @@ BEGIN
 END $$;
 
 -- 2) Create/replace sync trigger from auth.users to public.users
+ALTER TABLE public.users
+  ADD COLUMN IF NOT EXISTS selfie_url VARCHAR(500);
+
 CREATE OR REPLACE FUNCTION public.handle_auth_user_sync()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -103,6 +107,7 @@ BEGIN
     department,
     year,
     phone,
+    selfie_url,
     verified
   )
   VALUES (
@@ -117,6 +122,7 @@ BEGIN
     NULLIF(NEW.raw_user_meta_data->>'department', ''),
     NULLIF(NEW.raw_user_meta_data->>'year', ''),
     NULLIF(NEW.raw_user_meta_data->>'phone', ''),
+    NULLIF(NEW.raw_user_meta_data->>'selfie_url', ''),
     NEW.email_confirmed_at IS NOT NULL
   )
   ON CONFLICT (id) DO UPDATE SET
@@ -127,6 +133,7 @@ BEGIN
     department = COALESCE(EXCLUDED.department, public.users.department),
     year = COALESCE(EXCLUDED.year, public.users.year),
     phone = COALESCE(EXCLUDED.phone, public.users.phone),
+    selfie_url = COALESCE(EXCLUDED.selfie_url, public.users.selfie_url),
     verified = EXCLUDED.verified,
     updated_at = CURRENT_TIMESTAMP;
   RETURN NEW;
@@ -153,6 +160,7 @@ INSERT INTO public.users (
   department,
   year,
   phone,
+  selfie_url,
   verified
 )
 SELECT
@@ -167,6 +175,7 @@ SELECT
   NULLIF(au.raw_user_meta_data->>'department', ''),
   NULLIF(au.raw_user_meta_data->>'year', ''),
   NULLIF(au.raw_user_meta_data->>'phone', ''),
+  NULLIF(au.raw_user_meta_data->>'selfie_url', ''),
   au.email_confirmed_at IS NOT NULL
 FROM auth.users au
 LEFT JOIN public.users pu ON pu.id = au.id

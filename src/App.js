@@ -50,7 +50,7 @@ const theme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          background: '#050b12',
+          background: 'linear-gradient(135deg, #5f7fb7 0%, #6e6ad1 45%, #4aa3c8 100%)',
           minHeight: '100vh',
         },
       },
@@ -98,19 +98,19 @@ function App() {
       return raw
         ? JSON.parse(raw)
         : {
-            mode: 'both',
-            iridescenceColor: [0.4, 0.8, 1],
-            iridescenceSpeed: 1.25,
-            iridescenceAmplitude: 0.12,
-            darkVeilOpacity: 0.55
+            mode: 'iridescence',
+            iridescenceColor: [0.5, 0.6, 0.8],
+            iridescenceSpeed: 1.1,
+            iridescenceAmplitude: 0.1,
+            darkVeilOpacity: 0.2
           };
     } catch (err) {
       return {
-        mode: 'both',
-        iridescenceColor: [0.4, 0.8, 1],
-        iridescenceSpeed: 1.25,
-        iridescenceAmplitude: 0.12,
-        darkVeilOpacity: 0.55
+        mode: 'iridescence',
+        iridescenceColor: [0.5, 0.6, 0.8],
+        iridescenceSpeed: 1.1,
+        iridescenceAmplitude: 0.1,
+        darkVeilOpacity: 0.2
       };
     }
   });

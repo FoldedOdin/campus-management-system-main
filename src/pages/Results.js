@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -52,15 +52,18 @@ import { useNavigate } from 'react-router-dom';
 import Iridescence from '../components/Iridescence';
 import {
   candidatesService,
+  positionsService,
   votesService,
   electionSettingsService,
-  collegeEventRequestsService
+  collegeEventRequestsService,
+  chairmanAccessRequestsService
 } from '../lib/supabaseService';
 
 export default function Results() {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const [candidates, setCandidates] = useState([]);
+  const [positions, setPositions] = useState([]);
   const [electionSettings, setElectionSettings] = useState(null);
   const [totalVotes, setTotalVotes] = useState(0);
   const [blockchainCoverage, setBlockchainCoverage] = useState({ audited: 0, total: 0, percent: 0 });
@@ -70,6 +73,10 @@ export default function Results() {
   const [winnerEventRequest, setWinnerEventRequest] = useState(null);
   const [eventRequestNotice, setEventRequestNotice] = useState('');
   const [eventRequestError, setEventRequestError] = useState('');
+  const [chairmanAccessRequest, setChairmanAccessRequest] = useState(null);
+  const [chairmanNotice, setChairmanNotice] = useState('');
+  const [chairmanError, setChairmanError] = useState('');
+  const [submittingChairmanRequest, setSubmittingChairmanRequest] = useState(false);
   const [eventRequest, setEventRequest] = useState({
     event_title: '',
     event_description: '',
@@ -79,14 +86,16 @@ export default function Results() {
   useEffect(() => {
     const loadResults = async () => {
       try {
-        const [candidatesList, votesList, settingsList] = await Promise.all([
+        const [candidatesList, votesList, settingsList, positionsList] = await Promise.all([
           candidatesService.getAllAdmin ? candidatesService.getAllAdmin() : candidatesService.getAll(),
           votesService.getAllWithBlockchainAudit(),
-          electionSettingsService.getAll()
+          electionSettingsService.getAll(),
+          positionsService.getAll()
         ]);
 
         const auditedVotes = (votesList || []).filter((vote) => vote.has_blockchain_proof);
-        const votesForResults = auditedVotes;
+        const fallbackToAll = auditedVotes.length === 0 && (votesList || []).length > 0;
+        const votesForResults = fallbackToAll ? votesList : auditedVotes;
         const coveragePercent = votesList.length > 0
           ? Number(((auditedVotes.length / votesList.length) * 100).toFixed(1))
           : 0;
@@ -121,6 +130,7 @@ export default function Results() {
 
         setCandidates(candidatesWithPercentage);
         setTotalVotes(total);
+        setPositions(positionsList || []);
 
         if (
           computedWinner &&
@@ -129,6 +139,8 @@ export default function Results() {
         ) {
           const existingRequests = await collegeEventRequestsService.getByWinnerUser(currentUser.id);
           setWinnerEventRequest(existingRequests[0] || null);
+          const chairmanRequests = await chairmanAccessRequestsService.getByWinnerUser(currentUser.id);
+          setChairmanAccessRequest(chairmanRequests[0] || null);
         }
 
         if (settingsList && settingsList.length > 0) {
@@ -233,8 +245,41 @@ export default function Results() {
     }
   };
 
+  const handleSubmitChairmanRequest = async () => {
+    if (!winner || !currentUser?.id) return;
+    setChairmanError('');
+    setChairmanNotice('');
+    setSubmittingChairmanRequest(true);
+    try {
+      const pending = await chairmanAccessRequestsService.getPendingByWinnerUser(currentUser.id);
+      if (pending) {
+        setChairmanAccessRequest(pending);
+        setChairmanNotice('Your chairman access request is already pending approval.');
+        return;
+      }
+      const created = await chairmanAccessRequestsService.create({
+        winner_candidate_id: winner.id,
+        winner_user_id: currentUser.id,
+        status: 'pending'
+      });
+      setChairmanAccessRequest(created);
+      setChairmanNotice('Chairman access request submitted for admin approval.');
+    } catch (err) {
+      console.error('Error submitting chairman access request', err);
+      setChairmanError('Failed to submit chairman access request. Please try again.');
+    } finally {
+      setSubmittingChairmanRequest(false);
+    }
+  };
+
   const winner = getWinner();
   const isWinnerLoggedIn = !!winner && !!currentUser?.id && String(winner.user_id) === String(currentUser.id);
+  const winnerPositionName = (() => {
+    if (!winner) return '';
+    const posId = winner.position_id || winner.position?.id;
+    const match = positions.find((p) => String(p.id) === String(posId));
+    return match?.name || winner.position?.name || '';
+  })();
 
   const getElectionStatus = () => {
     if (!electionSettings) return 'not_started';
@@ -369,7 +414,7 @@ export default function Results() {
               </Typography>
               {electionSettings?.startTime && electionSettings?.endTime && (
                 <Typography variant="body2" sx={{ mb: 1 }}>
-                  Election Period: {new Date(electionSettings.startTime).toLocaleString()} → {new Date(electionSettings.endTime).toLocaleString()}
+                  Election Period: {new Date(electionSettings.startTime).toLocaleString()} â†’ {new Date(electionSettings.endTime).toLocaleString()}
                 </Typography>
               )}
               {timeRemaining && electionStatus === 'active' && (
@@ -384,40 +429,64 @@ export default function Results() {
             <Paper 
               elevation={3} 
               sx={{ 
-                p: 4, 
+                p: { xs: 3, md: 4 }, 
                 mb: 4, 
-                borderRadius: 3,
-                background: 'linear-gradient(135deg, #00b09b 0%, #96c93d 100%)',
+                borderRadius: 4,
+                background: 'linear-gradient(135deg, #04121f 0%, #0b3b5f 45%, #0ea5e9 100%)',
                 color: 'white',
-                textAlign: 'center'
+                overflow: 'hidden'
               }}
             >
-              <Typography variant="h4" fontWeight="bold" gutterBottom>
-                🏆 Election Winner 🏆
-              </Typography>
-              <Avatar
-                sx={{ 
-                  width: 120, 
-                  height: 120, 
-                  mx: 'auto', 
-                  mb: 2,
-                  background: 'white',
-                  color: '#00b09b',
-                  fontSize: '2.5rem',
-                  fontWeight: 'bold'
-                }}
-              >
-                {winner.name.split(' ').map(n => n[0]).join('')}
-              </Avatar>
-              <Typography variant="h3" fontWeight="bold" gutterBottom>
-                {winner.name}
-              </Typography>
-              <Typography variant="h5" gutterBottom>
-                {winner.party}
-              </Typography>
-              <Typography variant="h6">
-                {winner.votes} votes ({winner.percentage}%)
-              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: 'center' }}>
+                <Box sx={{ position: 'relative' }}>
+                  <Avatar
+                    src={winner.photo_url || undefined}
+                    alt={winner.name}
+                    sx={{ 
+                      width: 140, 
+                      height: 140,
+                      border: '4px solid rgba(255,255,255,0.65)',
+                      boxShadow: '0 18px 30px rgba(2, 6, 23, 0.35)',
+                      background: 'rgba(255,255,255,0.9)',
+                      color: '#0b3b5f',
+                      fontSize: '2.5rem',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    {winner.name.split(' ').map(n => n[0]).join('')}
+                  </Avatar>
+                </Box>
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="overline" sx={{ letterSpacing: 1.6, opacity: 0.85 }}>
+                    Winner Highlight
+                  </Typography>
+                  <Typography variant="h3" fontWeight="bold" gutterBottom>
+                    {winner.name}
+                  </Typography>
+                  <Typography variant="h6" sx={{ opacity: 0.9 }} gutterBottom>
+                    {winner.party || 'Independent'}
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 2 }}>
+                    <Chip
+                      label={`${winner.votes} Votes`}
+                      icon={<HowToVote />}
+                      sx={{ background: 'rgba(255,255,255,0.2)', color: 'white' }}
+                    />
+                    <Chip
+                      label={`${winner.percentage}% Share`}
+                      icon={<TrendingUp />}
+                      sx={{ background: 'rgba(255,255,255,0.2)', color: 'white' }}
+                    />
+                    {winnerPositionName && (
+                      <Chip
+                        label={winnerPositionName}
+                        icon={<People />}
+                        sx={{ background: 'rgba(255,255,255,0.2)', color: 'white' }}
+                      />
+                    )}
+                  </Box>
+                </Box>
+              </Box>
 
               {isWinnerLoggedIn && (
                 <Box sx={{ mt: 3, mx: 'auto', maxWidth: 700 }}>
@@ -458,6 +527,44 @@ export default function Results() {
                   >
                     Request College Events Handling
                   </Button>
+
+                  <Box sx={{ mt: 3 }}>
+                    <Alert
+                      severity={
+                        chairmanAccessRequest?.status === 'approved'
+                          ? 'success'
+                          : chairmanAccessRequest?.status === 'rejected'
+                            ? 'error'
+                            : 'info'
+                      }
+                      sx={{ textAlign: 'left', mb: 2 }}
+                    >
+                      {chairmanAccessRequest?.status === 'pending' && 'Your chairman access request is pending admin approval.'}
+                      {chairmanAccessRequest?.status === 'approved' && 'Your chairman access request has been approved.'}
+                      {chairmanAccessRequest?.status === 'rejected' && 'Your chairman access request was rejected by admin.'}
+                      {!chairmanAccessRequest?.status && 'As the chairman winner, you can request chairman login access.'}
+                    </Alert>
+
+                    {!!chairmanNotice && (
+                      <Alert severity="success" sx={{ mb: 2 }}>
+                        {chairmanNotice}
+                      </Alert>
+                    )}
+                    {!!chairmanError && (
+                      <Alert severity="error" sx={{ mb: 2 }}>
+                        {chairmanError}
+                      </Alert>
+                    )}
+
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleSubmitChairmanRequest}
+                      disabled={submittingChairmanRequest || chairmanAccessRequest?.status === 'pending'}
+                    >
+                      {submittingChairmanRequest ? 'Requesting...' : 'Request Chairman Login'}
+                    </Button>
+                  </Box>
                 </Box>
               )}
             </Paper>
@@ -697,4 +804,5 @@ export default function Results() {
     </Box>
   );
 }
+
 

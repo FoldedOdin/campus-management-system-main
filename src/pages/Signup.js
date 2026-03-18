@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { 
   TextField, 
   Button, 
@@ -62,6 +62,12 @@ export default function Signup() {
   const [activeStep, setActiveStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [selfieDataUrl, setSelfieDataUrl] = useState("");
+  const [selfieError, setSelfieError] = useState("");
+  const [cameraActive, setCameraActive] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const navigate = useNavigate();
   const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
   const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
@@ -138,6 +144,9 @@ export default function Signup() {
       }
       if (!formData.year) {
         newErrors.year = "Year is required";
+      }
+      if (!selfieDataUrl) {
+        newErrors.selfie = "Selfie capture is required for face verification";
       }
     }
 
@@ -258,6 +267,34 @@ export default function Signup() {
             setIsSubmitting(false);
             return;
           }
+
+          if (formData.role === "student" && selfieDataUrl) {
+            try {
+              const selfieBlob = dataUrlToBlob(selfieDataUrl);
+              const selfiePath = `${userId}/selfie-${Date.now()}.jpg`;
+              const { error: uploadError } = await supabase
+                .storage
+                .from("user-selfies")
+                .upload(selfiePath, selfieBlob, { contentType: "image/jpeg", upsert: true });
+              if (uploadError) {
+                throw uploadError;
+              }
+
+              const { data: publicData } = supabase
+                .storage
+                .from("user-selfies")
+                .getPublicUrl(selfiePath);
+              const selfieUrl = publicData?.publicUrl || "";
+
+              if (selfieUrl) {
+                await supabase.auth.updateUser({ data: { selfie_url: selfieUrl } });
+                await supabase.from("users").update({ selfie_url: selfieUrl }).eq("id", userId);
+              }
+            } catch (uploadErr) {
+              console.error("Selfie upload failed", uploadErr);
+              setSubmitError("Selfie upload failed. Please try again after login.");
+            }
+          }
         } else {
           setSubmitError("Supabase environment variables are missing.");
           setIsSubmitting(false);
@@ -279,6 +316,52 @@ export default function Signup() {
   };
 
   const steps = ['Personal Information', 'Account Setup'];
+
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    setCameraActive(false);
+  };
+
+  const startCamera = async () => {
+    try {
+      setSelfieError("");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setCameraActive(true);
+    } catch (err) {
+      console.error("Camera access failed", err);
+      setSelfieError("Unable to access camera. Please allow camera permission.");
+    }
+  };
+
+  const captureSelfie = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 480;
+    canvas.height = video.videoHeight || 360;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    setSelfieDataUrl(dataUrl);
+    setErrors((prev) => ({ ...prev, selfie: "" }));
+    stopCamera();
+  };
+
+  const dataUrlToBlob = (dataUrl) => {
+    const [meta, data] = dataUrl.split(",");
+    const mime = meta.match(/:(.*?);/)[1];
+    const bytes = atob(data);
+    const array = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i);
+    return new Blob([array], { type: mime });
+  };
 
   const getStepContent = (step) => {
     switch (step) {
@@ -406,6 +489,57 @@ export default function Signup() {
                     </Typography>
                   )}
                 </FormControl>
+
+                <Card sx={{ p: 2.5 }}>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Face Verification Selfie
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Capture a clear selfie to enable face verification during voting.
+                  </Typography>
+                  {selfieError && (
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                      {selfieError}
+                    </Alert>
+                  )}
+                  {errors.selfie && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {errors.selfie}
+                    </Alert>
+                  )}
+                  <Box sx={{ display: "flex", flexDirection: { xs: "column", md: "row" }, gap: 2, alignItems: "center" }}>
+                    <Box sx={{ width: 220, height: 160, borderRadius: 2, overflow: "hidden", background: "rgba(0,0,0,0.08)" }}>
+                      {selfieDataUrl ? (
+                        <img src={selfieDataUrl} alt="Selfie preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (
+                        <video ref={videoRef} autoPlay playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      )}
+                      <canvas ref={canvasRef} style={{ display: "none" }} />
+                    </Box>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                      {!cameraActive && !selfieDataUrl && (
+                        <Button variant="outlined" onClick={startCamera}>
+                          Open Camera
+                        </Button>
+                      )}
+                      {cameraActive && (
+                        <Button variant="contained" onClick={captureSelfie}>
+                          Capture Selfie
+                        </Button>
+                      )}
+                      {selfieDataUrl && (
+                        <Button variant="text" onClick={() => setSelfieDataUrl("")}>
+                          Retake
+                        </Button>
+                      )}
+                      {cameraActive && (
+                        <Button variant="text" color="warning" onClick={stopCamera}>
+                          Cancel
+                        </Button>
+                      )}
+                    </Box>
+                  </Box>
+                </Card>
               </>
             )}
 

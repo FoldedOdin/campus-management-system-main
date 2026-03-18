@@ -75,15 +75,15 @@ const App = () => {
             element={<ProtectedRoute component={StudentRegistration} requiredRole="Faculty" />} 
           />
           <Route 
-            path="batch-coordinator/attendance" 
+            path="/batch-coordinator/attendance" 
             element={<ProtectedRoute component={BatchAttendanceManagement} requiredRole="Faculty" />} 
           />
           <Route 
-            path="batch-coordinator/assignment" 
+            path="/batch-coordinator/assignment" 
             element={<ProtectedRoute component={BatchAssignmentManagement} requiredRole="Faculty" />} 
           />
           <Route 
-            path="batch-coordinator/marks" 
+            path="/batch-coordinator/marks" 
             element={<ProtectedRoute component={BatchMarks} requiredRole="Faculty" />} 
           />
           <Route 

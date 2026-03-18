@@ -7,6 +7,7 @@ const AuthContext = createContext();
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const checkUser = async () => {
@@ -27,14 +28,12 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (email, password) => {
-    const navigate = useNavigate(); // <-- Move useNavigate inside a function
     const { error, data } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     navigate('/hod-dashboard'); // Change as needed
   };
 
   const logout = async () => {
-    const navigate = useNavigate(); // <-- Move useNavigate inside a function
     await supabase.auth.signOut();
     setUser(null);
     navigate('/login');
